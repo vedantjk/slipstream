@@ -1,9 +1,9 @@
-#include "lib/parser.h"
 #include <iostream>
-int main(int argc, char* argv[]) {
 
+#include "lib/parser.h"
+int main(int argc, char* argv[]) {
   if (argc < 2) {
-    std::cerr << "Usage: "<< argv[0] << " <path to data> \n";
+    std::cerr << "Usage: " << argv[0] << " <path to data> \n";
     return 1;
   }
 
@@ -12,14 +12,13 @@ int main(int argc, char* argv[]) {
 
   auto [data, skipped] = parser.parseCSV();
 
-  if (!data)
-  {
+  if (!data) {
     std::cerr << "CSV parsing failed\n";
     return 1;
   }
 
   std::cout << "Invalid rows count : " << skipped << "\n";
-  std::cout<<"Successfully read "<< data.value().size()<<" records.\n";
+  std::cout << "Successfully read " << data.value().size() << " records.\n";
 
   return 0;
 }

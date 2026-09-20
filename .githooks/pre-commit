@@ -1,0 +1,7 @@
+#!/bin/sh
+# Format staged C++ files before each commit.
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(cpp|h|hpp)$')
+[ -z "$files" ] && exit 0
+
+clang-format -i $files
+git add $files
