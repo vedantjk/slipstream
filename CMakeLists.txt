@@ -39,3 +39,17 @@ target_link_libraries(
 
 include(GoogleTest)
 gtest_discover_tests(parser_tests)
+
+add_executable(wire_tests tests/wire_tests.cpp lib/wire.h)
+
+target_include_directories(
+        wire_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(
+        wire_tests
+        PRIVATE GTest::gtest_main
+)
+
+gtest_discover_tests(wire_tests)
