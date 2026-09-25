@@ -53,3 +53,17 @@ target_link_libraries(
 )
 
 gtest_discover_tests(wire_tests)
+
+add_executable(codec_tests tests/codec_tests.cpp lib/codec.h)
+
+target_include_directories(
+        codec_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(
+        codec_tests
+        PRIVATE GTest::gtest_main
+)
+
+gtest_discover_tests(codec_tests)
