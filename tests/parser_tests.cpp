@@ -1,21 +1,29 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <variant>
 
 #include "lib/parser.h"
 
+namespace {
+
+constexpr std::uint64_t kBaseEpochNs = 1'704'067'200'000'000'000ULL;
+
+}  // namespace
+
 class ParserTest : public ::testing::Test {
  protected:
   static void expectRejected(std::string_view row) {
-    EXPECT_FALSE(Parser::parse(row).has_value())
+    EXPECT_FALSE(Parser::parse(row, kBaseEpochNs).has_value())
         << "Unexpectedly accepted: " << row;
   }
 
   static QuoteData expectQuote(std::string_view row) {
-    auto result = Parser::parse(row);
+    auto result = Parser::parse(row, kBaseEpochNs);
     EXPECT_TRUE(result.has_value()) << "Unexpectedly rejected: " << row;
     if (!result.has_value() || !std::holds_alternative<QuoteData>(*result)) {
       ADD_FAILURE() << "Not a quote: " << row;
@@ -25,7 +33,7 @@ class ParserTest : public ::testing::Test {
   }
 
   static TradeData expectTrade(std::string_view row) {
-    auto result = Parser::parse(row);
+    auto result = Parser::parse(row, kBaseEpochNs);
     EXPECT_TRUE(result.has_value()) << "Unexpectedly rejected: " << row;
     if (!result.has_value() || !std::holds_alternative<TradeData>(*result)) {
       ADD_FAILURE() << "Not a trade: " << row;
@@ -43,7 +51,7 @@ TEST_F(ParserTest, ParsesValidQuote) {
   const QuoteData quote =
       expectQuote("09:30:00.003,Q,SYNTH3,87.37,55,87.49,50,,,");
 
-  EXPECT_EQ(quote.timestamp, 34200003000000);
+  EXPECT_EQ(quote.ts_ns, 1'704'101'400'003'000'000ULL);
   EXPECT_EQ(quote.symbol, "SYNTH3");
   EXPECT_EQ(quote.bid_price, 873700);
   EXPECT_EQ(quote.bid_qty, 55U);
@@ -54,11 +62,12 @@ TEST_F(ParserTest, ParsesValidQuote) {
 TEST_F(ParserTest, ParsesValidBuyTrade) {
   const TradeData trade = expectTrade("09:30:00.190,T,SYNTH2,,,,,248.53,65,B");
 
-  EXPECT_EQ(trade.timestamp, 34200190000000);
+  EXPECT_EQ(trade.ts_ns, 1'704'101'400'190'000'000ULL);
   EXPECT_EQ(trade.symbol, "SYNTH2");
   EXPECT_EQ(trade.trade_price, 2485300);
   EXPECT_EQ(trade.trade_qty, 65U);
-  EXPECT_EQ(trade.trade_side, 'B');
+  EXPECT_EQ(trade.aggressor, Aggressor::Buy);
+  EXPECT_EQ(trade.id, 0);
 }
 
 TEST_F(ParserTest, ParsesValidSellTrade) {
@@ -66,7 +75,7 @@ TEST_F(ParserTest, ParsesValidSellTrade) {
 
   EXPECT_EQ(trade.trade_price, 342200);
   EXPECT_EQ(trade.trade_qty, 225U);
-  EXPECT_EQ(trade.trade_side, 'S');
+  EXPECT_EQ(trade.aggressor, Aggressor::Sell);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +285,8 @@ class ParseCsvTest : public ::testing::Test {
 };
 
 TEST_F(ParseCsvTest, ReportsMissingFile) {
-  Parser parser(::testing::TempDir() + "slipstream_does_not_exist.csv");
+  Parser parser(::testing::TempDir() + "slipstream_does_not_exist.csv",
+                kBaseEpochNs);
 
   const ParserResult result = parser.parseCSV();
 
@@ -296,7 +306,7 @@ TEST_F(ParseCsvTest, SkipsPreambleHeaderAndBlankLines) {
       "09:30:00.003,Q,SYNTH3,87.37,55,87.49,50,,,\n"
       "09:30:00.190,T,SYNTH2,,,,,248.53,65,B\n");
 
-  const ParserResult result = Parser(path).parseCSV();
+  const ParserResult result = Parser(path, kBaseEpochNs).parseCSV();
 
   ASSERT_TRUE(result.data.has_value());
   EXPECT_EQ(result.invalid_parse_count, 0U);
@@ -316,7 +326,7 @@ TEST_F(ParseCsvTest, CountsInvalidRowsAndKeepsValidOnesInOrder) {
                    "09:30:00.200,X,SYNTH2,,,,,248.53,65,B\n"  // unknown type
                    "09:30:00.215,Q,SYNTH1,101.23,175,101.25,150,,,\n");
 
-  const ParserResult result = Parser(path).parseCSV();
+  const ParserResult result = Parser(path, kBaseEpochNs).parseCSV();
 
   ASSERT_TRUE(result.data.has_value());
   EXPECT_EQ(result.invalid_parse_count, 2U);
@@ -329,7 +339,7 @@ TEST_F(ParseCsvTest, CountsInvalidRowsAndKeepsValidOnesInOrder) {
 TEST_F(ParseCsvTest, EmptyFileYieldsNoRecords) {
   const std::string path = writeTempCsv("slipstream_empty.csv", "");
 
-  const ParserResult result = Parser(path).parseCSV();
+  const ParserResult result = Parser(path, kBaseEpochNs).parseCSV();
 
   ASSERT_TRUE(result.data.has_value());
   EXPECT_TRUE(result.data->empty());
@@ -339,15 +349,26 @@ TEST_F(ParseCsvTest, EmptyFileYieldsNoRecords) {
 // Timestamp parsing behaviour
 // ---------------------------------------------------------------------------
 
-TEST_F(ParserTest, ConvertsTimestampToNanosecondsSinceMidnight) {
-  auto result = Parser::parse("09:30:00.003,Q,SYNTH1,87.37,50,87.40,60,,,");
+TEST_F(ParserTest, ConvertsTimestampToEpochNanoseconds) {
+  auto result =
+      Parser::parse("09:30:00.003,Q,SYNTH1,87.37,50,87.40,60,,,", kBaseEpochNs);
 
   ASSERT_TRUE(result.has_value());
   ASSERT_TRUE(std::holds_alternative<QuoteData>(*result));
 
   const auto& quote = std::get<QuoteData>(*result);
 
-  EXPECT_EQ(quote.timestamp, 34'200'003'000'000ULL);
+  EXPECT_EQ(quote.ts_ns, 1'704'101'400'003'000'000ULL);
+}
+
+TEST_F(ParserTest, RejectsTimestampThatWouldOverflowEpochNanoseconds) {
+  constexpr auto kBaseNearMax =
+      std::numeric_limits<std::uint64_t>::max() - 999'999ULL;
+
+  const auto result =
+      Parser::parse("00:00:00.001,Q,SYNTH1,87.37,50,87.40,60,,,", kBaseNearMax);
+
+  EXPECT_FALSE(result.has_value());
 }
 
 TEST_F(ParserTest, RejectsInvalidTimestampFormat) {

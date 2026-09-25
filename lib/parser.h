@@ -11,27 +11,10 @@
 #include <variant>
 #include <vector>
 
+#include "messages.h"
+
 #ifndef SLIPSTREAM_PARSER_H
 #define SLIPSTREAM_PARSER_H
-
-struct QuoteData {
-  uint64_t timestamp = 0;
-  std::string symbol;
-  int64_t bid_price = 0;
-  uint32_t bid_qty = 0;
-  int64_t ask_price = 0;
-  uint32_t ask_qty = 0;
-};
-
-struct TradeData {
-  uint64_t timestamp = 0;
-  std::string symbol;
-  int64_t trade_price = 0;
-  uint32_t trade_qty = 0;
-  char trade_side = ' ';  // 'S' or 'B'
-};
-
-using MarketData = std::variant<QuoteData, TradeData>;
 
 struct ParserResult {
   std::optional<std::vector<MarketData>> data;
@@ -40,6 +23,7 @@ struct ParserResult {
 
 class Parser {
   std::string filename_;
+  std::uint64_t base_epoch_ns_;
   using Cells = std::array<std::string_view, 10>;
 
   static std::optional<Cells> splitRow(std::string_view line) {
@@ -154,9 +138,11 @@ class Parser {
   }
 
  public:
-  Parser(std::string filename) : filename_(std::move(filename)) {}
+  Parser(std::string filename, std::uint64_t base_epoch_ns)
+      : filename_(std::move(filename)), base_epoch_ns_(base_epoch_ns) {}
 
-  static std::optional<MarketData> parse(std::string_view line) {
+  static std::optional<MarketData> parse(std::string_view line,
+                                         std::uint64_t base_epoch_ns) {
     auto result = splitRow(line);
 
     if (!result.has_value()) return std::nullopt;
@@ -164,15 +150,19 @@ class Parser {
     const Cells& cells = *result;
 
     if (cells[0].empty() || cells[2].empty()) return std::nullopt;
-    uint64_t timestamp;
-    if (!parseTimestamp(cells[0], timestamp)) return std::nullopt;
+    std::uint64_t time_since_midnight;
+    if (!parseTimestamp(cells[0], time_since_midnight)) return std::nullopt;
+    if (time_since_midnight >
+        std::numeric_limits<std::uint64_t>::max() - base_epoch_ns)
+      return std::nullopt;
+    const std::uint64_t ts_ns = base_epoch_ns + time_since_midnight;
     std::string_view symbol = cells[2];
 
     if (symbol.size() > 12) return std::nullopt;
 
     if (cells[1] == "Q") {
       QuoteData quote_data;
-      quote_data.timestamp = timestamp;
+      quote_data.ts_ns = ts_ns;
       quote_data.symbol = symbol;
       if (cells[3].empty() || cells[4].empty() || cells[5].empty() ||
           cells[6].empty())
@@ -191,7 +181,7 @@ class Parser {
 
     if (cells[1] == "T") {
       TradeData trade_data;
-      trade_data.timestamp = timestamp;
+      trade_data.ts_ns = ts_ns;
       trade_data.symbol = symbol;
       if (!cells[3].empty() || !cells[4].empty() || !cells[5].empty() ||
           !cells[6].empty()) {
@@ -209,7 +199,7 @@ class Parser {
           !parseQty(std::string(cells[8]), trade_data.trade_qty))
         return std::nullopt;
 
-      trade_data.trade_side = cells[9][0];
+      trade_data.aggressor = cells[9] == "B" ? Aggressor::Buy : Aggressor::Sell;
       return trade_data;
     }
 
@@ -232,7 +222,7 @@ class Parser {
 
       std::string_view s(line);
 
-      if (auto record = parse(s); record.has_value())
+      if (auto record = parse(s, base_epoch_ns_); record.has_value())
         data.push_back(std::move(*record));
       else
         invalid_parse_count++;
