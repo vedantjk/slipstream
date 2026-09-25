@@ -85,6 +85,32 @@ inline constexpr std::optional<std::uint16_t> bodyLengthFor(
   }
 }
 
+inline std::expected<std::size_t, DecodeError> frameSizeFromHeader(
+    std::span<const std::byte> bytes) {
+  if (bytes.size() < sizeof(wire::Header)) {
+    return std::unexpected(DecodeError::FrameTooShort);
+  }
+
+  wire::Header header{};
+  std::memcpy(&header, bytes.data(), sizeof(header));
+
+  if (header.version != 1) {
+    return std::unexpected(DecodeError::UnsupportedVersion);
+  }
+
+  const std::uint8_t raw_type = std::to_integer<std::uint8_t>(bytes[2]);
+  const auto expected_body_len = bodyLengthFor(raw_type);
+  if (!expected_body_len.has_value()) {
+    return std::unexpected(DecodeError::UnknownMessageType);
+  }
+
+  if (header.body_len != *expected_body_len) {
+    return std::unexpected(DecodeError::BodyLengthMismatch);
+  }
+
+  return sizeof(wire::Header) + *expected_body_len;
+}
+
 namespace codec_detail {
 
 template <typename Body>
@@ -103,31 +129,16 @@ inline std::string readSymbol(const char (&symbol)[wire::kSymbolLen]) {
 
 inline std::expected<Decoded, DecodeError> decode(
     std::span<const std::byte> frame) {
-  if (frame.size() < sizeof(wire::Header)) {
-    return std::unexpected(DecodeError::FrameTooShort);
+  const auto expected_frame_size = frameSizeFromHeader(frame);
+  if (!expected_frame_size.has_value()) {
+    return std::unexpected(expected_frame_size.error());
   }
 
-  wire::Header header{};
-  std::memcpy(&header, frame.data(), sizeof(header));
-
-  if (header.version != 1) {
-    return std::unexpected(DecodeError::UnsupportedVersion);
-  }
-
-  const std::uint8_t raw_type = std::to_integer<std::uint8_t>(frame[2]);
-  const auto expected_body_len = bodyLengthFor(raw_type);
-  if (!expected_body_len.has_value()) {
-    return std::unexpected(DecodeError::UnknownMessageType);
-  }
-
-  if (header.body_len != *expected_body_len) {
-    return std::unexpected(DecodeError::BodyLengthMismatch);
-  }
-
-  if (frame.size() != sizeof(wire::Header) + header.body_len) {
+  if (frame.size() != *expected_frame_size) {
     return std::unexpected(DecodeError::FrameLengthMismatch);
   }
 
+  const std::uint8_t raw_type = std::to_integer<std::uint8_t>(frame[2]);
   switch (raw_type) {
     case 1: {
       const auto body = codec_detail::readBody<wire::Quote>(frame);

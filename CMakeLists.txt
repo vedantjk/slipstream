@@ -54,7 +54,11 @@ target_link_libraries(
 
 gtest_discover_tests(wire_tests)
 
-add_executable(codec_tests tests/codec_tests.cpp lib/codec.h)
+add_executable(codec_tests
+        tests/codec_tests.cpp
+        tests/reassembler_tests.cpp
+        lib/codec.h
+        lib/reassembler.h)
 
 target_include_directories(
         codec_tests

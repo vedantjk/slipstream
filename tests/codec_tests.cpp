@@ -184,6 +184,17 @@ TEST(CodecTest, ReportsBodyLengthForKnownMessageTypes) {
   EXPECT_FALSE(bodyLengthFor(11).has_value());
 }
 
+TEST(CodecTest, ReportsFrameSizeFromValidHeader) {
+  const auto frame =
+      makeFrame(wire::MsgType::Heartbeat, wire::Heartbeat{.ts_ns = 123'456});
+
+  const auto frame_size = frameSizeFromHeader(
+      std::span<const std::byte>(frame).first(sizeof(wire::Header)));
+
+  ASSERT_TRUE(frame_size.has_value());
+  EXPECT_EQ(*frame_size, 12U);
+}
+
 TEST(CodecTest, DecodesQuote) {
   wire::Quote body{};
   std::memcpy(body.symbol, "ABCDEFGHIJKL", wire::kSymbolLen);
