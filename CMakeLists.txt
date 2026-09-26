@@ -20,6 +20,10 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest)
 
+add_library(slipstream_codec STATIC lib/codec.cpp)
+target_include_directories(slipstream_codec PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(slipstream_codec PUBLIC cxx_std_23)
+
 add_executable(slipstream main.cpp)
 add_executable(market_data_client market_data_client.cpp
         lib/parser.h)
@@ -67,7 +71,7 @@ target_include_directories(
 
 target_link_libraries(
         codec_tests
-        PRIVATE GTest::gtest_main
+        PRIVATE slipstream_codec GTest::gtest_main
 )
 
 gtest_discover_tests(codec_tests)
