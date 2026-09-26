@@ -71,3 +71,8 @@ target_link_libraries(
 )
 
 gtest_discover_tests(codec_tests)
+
+add_executable(replay_tests tests/replay_tests.cpp lib/replay.h)
+target_include_directories(replay_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(replay_tests PRIVATE GTest::gtest_main)
+gtest_discover_tests(replay_tests)
